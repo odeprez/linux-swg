@@ -17,6 +17,8 @@
 #include "optee_ffa.h"
 #include "optee_rpc_cmd.h"
 
+#define OPTEE_FFA_SEC_CAP_ASYNC_NOTIF		BIT(5)
+
 /*
  * This file implement the FF-A ABI used when communicating with secure world
  * OP-TEE OS via FF-A.
@@ -653,7 +655,7 @@ static int optee_ffa_do_call_with_arg(struct tee_context *ctx,
  * with a matching configuration.
  */
 
-static bool optee_ffa_api_is_compatbile(struct ffa_device *ffa_dev,
+static bool optee_ffa_api_is_compatible(struct ffa_device *ffa_dev,
 					const struct ffa_ops *ops)
 {
 	const struct ffa_msg_ops *msg_ops = ops->msg_ops;
@@ -784,6 +786,38 @@ static void optee_ffa_remove(struct ffa_device *ffa_dev)
 	kfree(optee);
 }
 
+static int simple_call_with_arg(struct tee_context *ctx, u32 cmd)
+{
+	struct optee_shm_arg_entry *entry;
+	struct optee_msg_arg *msg_arg;
+	struct tee_shm *shm;
+	u_int offs;
+	int rc;
+
+	msg_arg = optee_get_msg_arg(ctx, 0, &entry, &shm, &offs);
+	if (IS_ERR(msg_arg))
+		return PTR_ERR(msg_arg);
+
+	msg_arg->cmd = cmd;
+	rc = optee_ffa_do_call_with_arg(ctx, shm, offs);
+
+	optee_free_msg_arg(ctx, entry, offs);
+
+	return rc;
+}
+
+static void optee_notif_cb(int notify_id, void *cb_data)
+{
+	struct optee *optee = cb_data;
+	struct ffa_device *dev = optee->ffa.ffa_dev;
+	int rc;
+
+	rc = simple_call_with_arg(optee->ctx, OPTEE_MSG_CMD_DO_BOTTOM_HALF);
+
+	pr_info("%s from VM %x notif %lu rc %d\n", __func__,
+		dev->id, BIT(notify_id), rc);
+}
+
 static int optee_ffa_probe(struct ffa_device *ffa_dev)
 {
 	const struct ffa_ops *ffa_ops;
@@ -798,7 +832,7 @@ static int optee_ffa_probe(struct ffa_device *ffa_dev)
 
 	ffa_ops = ffa_dev->ops;
 
-	if (!optee_ffa_api_is_compatbile(ffa_dev, ffa_ops))
+	if (!optee_ffa_api_is_compatible(ffa_dev, ffa_ops))
 		return -EINVAL;
 
 	if (!optee_ffa_exchange_caps(ffa_dev, ffa_ops, &sec_caps,
@@ -864,6 +898,14 @@ static int optee_ffa_probe(struct ffa_device *ffa_dev)
 	rc = optee_notif_init(optee, OPTEE_DEFAULT_MAX_NOTIF_VALUE);
 	if (rc)
 		goto err_close_ctx;
+
+	if (sec_caps & OPTEE_FFA_SEC_CAP_ASYNC_NOTIF) {
+		/* Bind notification id 0 sender OP-TEE, receiver linux driver. */
+		rc = ffa_ops->notifier_ops->notify_request(ffa_dev, false,
+				optee_notif_cb, optee, 0);
+
+		pr_info("Asynchronous notifications ret=%d.\n", rc);
+	}
 
 	rc = optee_enumerate_devices(PTA_CMD_GET_DEVICES);
 	if (rc)
