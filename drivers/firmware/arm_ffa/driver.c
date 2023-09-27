@@ -1202,9 +1202,8 @@ static void ffa_setup_partitions(void)
 			continue;
 		}
 
-		if (drv_info->version > FFA_VERSION_1_0 &&
-		    !(tpbuf->properties & FFA_PARTITION_AARCH64_EXEC))
-			ffa_mode_32bit_set(ffa_dev);
+		/* TODO: force 32b direct req/resp for Hafnium. */
+		ffa_mode_32bit_set(ffa_dev);
 
 		info = kzalloc(sizeof(*info), GFP_KERNEL);
 		if (!info) {
