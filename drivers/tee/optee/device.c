@@ -142,10 +142,12 @@ static int __optee_enumerate_devices(u32 func)
 	num_devices = shm_size / sizeof(uuid_t);
 
 	for (idx = 0; idx < num_devices; idx++) {
-		rc = optee_register_device(&device_uuid[idx]);
-		if (rc)
-			goto out_shm;
+		pr_info("optee_register_device idx %u", idx);
+		//rc = optee_register_device(&device_uuid[idx]);
+		//if (rc)
+		//	goto out_shm;
 	}
+	rc=0;
 
 out_shm:
 	tee_shm_free(device_shm);
